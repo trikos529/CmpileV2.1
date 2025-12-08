@@ -11,6 +11,10 @@ from rich.progress import Progress
 
 console = Console()
 
+def _default_log(message, style=""):
+    # Helper for standalone script running
+    console.print(f"[{style}]{message}[/{style}]" if style else message)
+
 if getattr(sys, 'frozen', False):
     # Running as compiled exe
     BASE_DIR = os.path.dirname(sys.executable)
@@ -22,166 +26,149 @@ INTERNAL_DOWNLOADS = os.path.join(BASE_DIR, "internal_downloads")
 GCC_DIR = os.path.join(INTERNAL_DOWNLOADS, "gcc")
 VCPKG_DIR = os.path.join(INTERNAL_DOWNLOADS, "vcpkg")
 
-# LLVM-MinGW (UCRT, 64-bit) 
+# LLVM-MinGW (UCRT, 64-bit)
 # Provides Clang/LLD with MinGW-w64 runtime.
-GCC_URL = "https://github.com/mstorsjo/llvm-mingw/releases/download/20251202/llvm-mingw-20251202-ucrt-x86_64.zip"
+GCC_URL = "https://github.com/mstorsjo/llvm-mingw/releases/download/20220323/llvm-mingw-20220323-ucrt-x86_64.zip"
 # MinGit
 GIT_URL = "https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/MinGit-2.43.0-64-bit.zip"
 
 GIT_DIR = os.path.join(INTERNAL_DOWNLOADS, "git")
 
-def download_file(url, target_path):
-    # Check if we have a valid stdout for progress bar
-    use_progress = True
-    if sys.stdout is None or getattr(sys.stdout, 'isatty', lambda: False)() == False:
-         # In GUI/Noconsole mode, we might not have a proper tty
-         # Rich can handle non-tty but checking None is crucial
-         if sys.stdout is None:
-             use_progress = False
+def download_file(url, target_path, log_func=_default_log):
+    # If a custom log_func is provided, we avoid using the Rich progress bar
+    # as it's not suitable for GUI logs.
+    use_progress = (log_func == _default_log) and sys.stdout is not None and getattr(sys.stdout, 'isatty', lambda: False)()
 
     try:
         with requests.get(url, stream=True) as response:
             response.raise_for_status()
             total_size = int(response.headers.get("content-length", 0))
-            
+
             if use_progress:
                 with Progress(console=console) as progress:
-                    task = progress.add_task(f"[green]Downloading {os.path.basename(target_path)}...", total=total_size)
+                    task = progress.add_task(f"Downloading {os.path.basename(target_path)}...", total=total_size)
                     with open(target_path, "wb") as f:
                         for chunk in response.iter_content(chunk_size=8192):
                             f.write(chunk)
                             progress.update(task, advance=len(chunk))
             else:
-                # Silent download
+                log_func(f"Downloading {os.path.basename(target_path)} ({total_size / 1024 / 1024:.2f} MB)...")
                 with open(target_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
+                log_func("Download complete.")
+
     except Exception as e:
-        # Propagate exception to caller
+        log_func(f"Failed to download {url}: {e}", "bold red")
         raise e
 
-def install_git():
+def install_git(log_func=_default_log):
     if os.path.exists(GIT_DIR) and os.path.exists(os.path.join(GIT_DIR, "cmd", "git.exe")):
          return
 
     os.makedirs(INTERNAL_DOWNLOADS, exist_ok=True)
     zip_path = os.path.join(INTERNAL_DOWNLOADS, "git.zip")
-    
+
     if not os.path.exists(zip_path):
-        console.print(f"[yellow]Downloading MinGit from {GIT_URL}...[/yellow]")
+        log_func(f"Downloading MinGit from {GIT_URL}...")
         try:
-            download_file(GIT_URL, zip_path)
+            download_file(GIT_URL, zip_path, log_func=log_func)
         except Exception as e:
-            console.print(f"[red]Failed to download Git: {e}[/red]")
+            log_func(f"Failed to download Git: {e}", "bold red")
             return
 
-    console.print("[yellow]Extracting Git...[/yellow]")
+    log_func("Extracting Git...")
     try:
         os.makedirs(GIT_DIR, exist_ok=True)
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(GIT_DIR)
-        
-        console.print("[green]Git installed successfully.[/green]")
+
+        log_func("Git installed successfully.", "bold green")
         os.remove(zip_path)
     except Exception as e:
-         console.print(f"[red]Failed to extract Git: {e}[/red]")
+         log_func(f"Failed to extract Git: {e}", "bold red")
 
-def install_gcc():
-    # We download llvm-mingw but name the dir 'gcc' to keep standard with other scripts
-    # or we can rename variables, but 'gcc' implies 'compiler directory' here.
+def install_gcc(log_func=_default_log):
     if os.path.exists(GCC_DIR) and os.path.exists(os.path.join(GCC_DIR, "bin", "clang++.exe")):
-        # console.print("[green]Compiler is already installed.[/green]")
         return
 
     os.makedirs(INTERNAL_DOWNLOADS, exist_ok=True)
     zip_path = os.path.join(INTERNAL_DOWNLOADS, "compiler.zip")
-    
+
     if not os.path.exists(zip_path):
-        console.print(f"[yellow]Downloading LLVM-MinGW from {GCC_URL}...[/yellow]")
-        download_file(GCC_URL, zip_path)
- 
-    console.print("[yellow]Extracting Compiler...[/yellow]")
-    # Raising exception if this fails is good
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(INTERNAL_DOWNLOADS)
-    
-    # Determine extracted folder name (starts with llvm-mingw)
-    extracted_name = None
-    for name in os.listdir(INTERNAL_DOWNLOADS):
-        if name.startswith("llvm-mingw"):
-            extracted_name = name
-            break
-    
-    if extracted_name:
-            extracted_path = os.path.join(INTERNAL_DOWNLOADS, extracted_name)
-            
-            # Robust move/rename with retries
-            max_retries = 5
-            for i in range(max_retries):
-                try:
-                    if os.path.exists(GCC_DIR):
-                        # Force remove read-only files if necessary
-                        def on_rm_error(func, path, exc_info):
-                            os.chmod(path, 0o777)
-                            func(path)
-                        shutil.rmtree(GCC_DIR, onerror=on_rm_error)
-                    
-                    # Wait a tiny bit for FS to release locks
-                    time.sleep(0.5) 
-                    
-                    shutil.move(extracted_path, GCC_DIR)
-                    break
-                except PermissionError:
-                    if i < max_retries - 1:
+        log_func(f"Downloading LLVM-MinGW from {GCC_URL}...")
+        download_file(GCC_URL, zip_path, log_func=log_func)
+
+    log_func("Extracting Compiler...")
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(INTERNAL_DOWNLOADS)
+
+        extracted_name = None
+        for name in os.listdir(INTERNAL_DOWNLOADS):
+            if name.startswith("llvm-mingw"):
+                extracted_name = name
+                break
+
+        if extracted_name:
+                extracted_path = os.path.join(INTERNAL_DOWNLOADS, extracted_name)
+
+                max_retries = 5
+                for i in range(max_retries):
+                    try:
+                        if os.path.exists(GCC_DIR):
+                            def on_rm_error(func, path, exc_info):
+                                os.chmod(path, 0o777)
+                                func(path)
+                            shutil.rmtree(GCC_DIR, onerror=on_rm_error)
+
+                        time.sleep(0.5)
+                        shutil.move(extracted_path, GCC_DIR)
+                        break
+                    except (PermissionError, OSError) as e:
+                        if (isinstance(e, OSError) and e.errno not in [errno.EACCES, errno.ENOTEMPTY]) or i == max_retries - 1:
+                            raise
                         time.sleep(1)
-                    else:
-                        raise
-                except OSError as e:
-                     # Access denied or folder not empty
-                     if e.errno == errno.EACCES or e.errno == errno.ENOTEMPTY:
-                         if i < max_retries - 1:
-                             time.sleep(1)
-                             continue
-                     raise
-    else:
-        raise Exception(f"Extraction failed: Could not find llvm-mingw folder in {INTERNAL_DOWNLOADS}")
-    
-    console.print("[green]Compiler installed successfully.[/green]")
-    if os.path.exists(zip_path):
-        os.remove(zip_path)
+        else:
+            raise Exception(f"Extraction failed: Could not find llvm-mingw folder in {INTERNAL_DOWNLOADS}")
 
+        log_func("Compiler installed successfully.", "bold green")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+    except Exception as e:
+        log_func(f"Compiler installation failed: {e}", "bold red")
+        raise e
 
-def install_vcpkg(git_path_env=None):
+def install_vcpkg(git_path_env=None, log_func=_default_log):
     if os.path.exists(VCPKG_DIR) and os.path.exists(os.path.join(VCPKG_DIR, "vcpkg.exe")):
-         # console.print("[green]vcpkg is already installed.[/green]")
          return
 
-    console.print("[yellow]Cloning vcpkg...[/yellow]")
-    
-    # Use the git we just installed if available
-    # We assume 'git' command is available in the environment passed, or in global path
+    log_func("Cloning vcpkg...")
     env = os.environ.copy()
     if git_path_env:
         env["PATH"] = git_path_env + os.pathsep + env["PATH"]
-    
+
     if os.path.exists(VCPKG_DIR):
         shutil.rmtree(VCPKG_DIR)
-    
-    subprocess.run(["git", "clone", "https://github.com/microsoft/vcpkg.git", VCPKG_DIR], check=True, env=env)
-    
-    console.print("[yellow]Bootstrapping vcpkg...[/yellow]")
-    bootstrap_script = os.path.join(VCPKG_DIR, "bootstrap-vcpkg.bat")
-    subprocess.run([bootstrap_script], cwd=VCPKG_DIR, check=True, shell=True, env=env)
-    
-    console.print("[green]vcpkg installed successfully.[/green]")
+
+    try:
+        subprocess.run(["git", "clone", "https://github.com/microsoft/vcpkg.git", VCPKG_DIR], check=True, env=env, capture_output=True, text=True)
+
+        log_func("Bootstrapping vcpkg...")
+        bootstrap_script = os.path.join(VCPKG_DIR, "bootstrap-vcpkg.bat")
+        subprocess.run([bootstrap_script], cwd=VCPKG_DIR, check=True, shell=True, env=env, capture_output=True, text=True)
+
+        log_func("vcpkg installed successfully.", "bold green")
+    except subprocess.CalledProcessError as e:
+        log_func(f"vcpkg installation failed: {e.stderr}", "bold red")
+        raise e
 
 if __name__ == "__main__":
-    console.print("[bold blue]Checking dependencies...[/bold blue]")
-    install_git()
-    install_gcc()
-    
-    # Add git to path for vcpkg install
+    _default_log("Checking dependencies...", "bold blue")
+    install_git(log_func=_default_log)
+    install_gcc(log_func=_default_log)
+
     git_cmd_path = os.path.join(GIT_DIR, "cmd")
-    install_vcpkg(git_path_env=git_cmd_path)
-    
-    console.print("[bold blue]Dependencies check complete.[/bold blue]")
+    install_vcpkg(git_path_env=git_cmd_path, log_func=_default_log)
+
+    _default_log("Dependencies check complete.", "bold blue")
