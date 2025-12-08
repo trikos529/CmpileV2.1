@@ -14,12 +14,11 @@ INTERNAL_DOWNLOADS = download_script.INTERNAL_DOWNLOADS
 GCC_BIN = os.path.join(download_script.GCC_DIR, "bin")
 GPP_EXE = os.path.join(GCC_BIN, "clang++.exe")
 GCC_EXE = os.path.join(GCC_BIN, "clang.exe")
-
 GIT_CMD = os.path.join(download_script.INTERNAL_DOWNLOADS, "git", "cmd")
 
 def setup_git_env():
     """Adds local git to PATH if present."""
-    if os.path.exists(GIT_CMD):
+    if not download_script.is_tool_on_path("git") and os.path.exists(GIT_CMD):
         if GIT_CMD not in os.environ["PATH"]:
             os.environ["PATH"] = GIT_CMD + os.pathsep + os.environ["PATH"]
             return True
@@ -34,21 +33,23 @@ def ensure_environment(log_func):
     setup_git_env()
 
     # Check GCC
-    if not os.path.exists(GPP_EXE):
-        log_func("GCC not found. installing...")
-        try:
-            download_script.install_gcc(log_func=log_func)
-        except Exception as e:
-            log_func(f"Failed to install GCC: {e}", "bold red")
-            raise e
+    if not (download_script.is_tool_on_path("clang") or download_script.is_tool_on_path("gcc")):
+        if not os.path.exists(GPP_EXE):
+            log_func("GCC not found. installing...")
+            try:
+                download_script.install_gcc(log_func=log_func)
+            except Exception as e:
+                log_func(f"Failed to install GCC: {e}", "bold red")
+                raise e
 
-    # Add GCC to PATH so vcpkg/cmake can find it
-    if GCC_BIN not in os.environ["PATH"]:
-        os.environ["PATH"] = GCC_BIN + os.pathsep + os.environ["PATH"]
+    # Add internal GCC to PATH if no system compiler is found
+    if not (download_script.is_tool_on_path("clang") or download_script.is_tool_on_path("gcc")):
+        if GCC_BIN not in os.environ["PATH"]:
+            os.environ["PATH"] = GCC_BIN + os.pathsep + os.environ["PATH"]
 
     # Check vcpkg
     vcpkg_mgr = vcpkg_automation.VcpkgManager(INTERNAL_DOWNLOADS, log_func=log_func)
-    if not vcpkg_mgr.is_installed():
+    if not vcpkg_mgr.is_installed() and not download_script.is_tool_on_path("vcpkg"):
         log_func("vcpkg not found. installing...")
         try:
             download_script.install_vcpkg(git_path_env=GIT_CMD, log_func=log_func)
@@ -61,7 +62,12 @@ def ensure_environment(log_func):
 def get_compiler_for_file(filepath):
     """Returns the appropriate compiler executable."""
     if filepath.endswith(('.c', '.C')):
+        if download_script.is_tool_on_path("clang"): return "clang"
+        if download_script.is_tool_on_path("gcc"): return "gcc"
         return GCC_EXE
+
+    if download_script.is_tool_on_path("clang++"): return "clang++"
+    if download_script.is_tool_on_path("g++"): return "g++"
     return GPP_EXE
 
 class CmpileBuilder:
@@ -81,7 +87,22 @@ class CmpileBuilder:
                 ui.display_status(message)
 
     def build_and_run(self, source_files, compiler_flags=None, clean=False, run=True):
-        files = [os.path.abspath(f) for f in source_files]
+
+        expanded_files = []
+        for path in source_files:
+            if os.path.isdir(path):
+                for root, _, files in os.walk(path):
+                    for file in files:
+                        if file.endswith(('.c', '.cpp', '.C', '.CPP')):
+                            expanded_files.append(os.path.join(root, file))
+            elif os.path.isfile(path):
+                expanded_files.append(path)
+
+        if not expanded_files:
+            self.log("No valid source files found.", "bold red")
+            return False
+
+        files = [os.path.abspath(f) for f in expanded_files]
         for path in files:
             if not os.path.exists(path):
                 self.log(f"File not found: {path}", "bold red")
@@ -167,11 +188,16 @@ class CmpileBuilder:
 
         # Link
         self.log("Linking...")
-        linker = GCC_EXE
-        for src in files:
-            if get_compiler_for_file(src) == GPP_EXE:
-                linker = GPP_EXE
-                break
+
+        cpp_in_use = any(get_compiler_for_file(src) in [GPP_EXE, "g++", "clang++"] for src in files)
+        if cpp_in_use:
+            if download_script.is_tool_on_path("clang++"): linker = "clang++"
+            elif download_script.is_tool_on_path("g++"): linker = "g++"
+            else: linker = GPP_EXE
+        else:
+            if download_script.is_tool_on_path("clang"): linker = "clang"
+            elif download_script.is_tool_on_path("gcc"): linker = "gcc"
+            else: linker = GCC_EXE
 
         exe_name = os.path.splitext(os.path.basename(files[0]))[0] + ".exe"
         output_exe = os.path.join(OUT_DIR, exe_name)
