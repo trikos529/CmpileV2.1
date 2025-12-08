@@ -11,6 +11,10 @@ from rich.progress import Progress
 
 console = Console()
 
+def is_tool_on_path(name):
+    """Check whether `name` is on PATH and marked as executable."""
+    return shutil.which(name) is not None
+
 def _default_log(message, style=""):
     # Helper for standalone script running
     console.print(f"[{style}]{message}[/{style}]" if style else message)
@@ -63,6 +67,9 @@ def download_file(url, target_path, log_func=_default_log):
         raise e
 
 def install_git(log_func=_default_log):
+    if is_tool_on_path("git"):
+        log_func("Git is already available on PATH.", "bold blue")
+        return
     if os.path.exists(GIT_DIR) and os.path.exists(os.path.join(GIT_DIR, "cmd", "git.exe")):
          return
 
@@ -89,6 +96,9 @@ def install_git(log_func=_default_log):
          log_func(f"Failed to extract Git: {e}", "bold red")
 
 def install_gcc(log_func=_default_log):
+    if is_tool_on_path("clang") or is_tool_on_path("gcc"):
+        log_func("An existing C/C++ compiler (clang/gcc) was found on PATH.", "bold blue")
+        return
     if os.path.exists(GCC_DIR) and os.path.exists(os.path.join(GCC_DIR, "bin", "clang++.exe")):
         return
 
@@ -140,6 +150,9 @@ def install_gcc(log_func=_default_log):
         raise e
 
 def install_vcpkg(git_path_env=None, log_func=_default_log):
+    if is_tool_on_path("vcpkg"):
+        log_func("vcpkg is already available on PATH.", "bold blue")
+        return
     if os.path.exists(VCPKG_DIR) and os.path.exists(os.path.join(VCPKG_DIR, "vcpkg.exe")):
          return
 
