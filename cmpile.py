@@ -59,9 +59,19 @@ def ensure_environment(log_func):
 
     return vcpkg_mgr
 
-def get_compiler_for_file(filepath):
+def get_compiler_for_file(filepath, profile={}):
     """Returns the appropriate compiler executable."""
     if filepath.endswith(('.c', '.C')):
+        return profile.get("c_compiler") or (
+            "clang" if download_script.is_tool_on_path("clang") else
+            "gcc" if download_script.is_tool_on_path("gcc") else
+            GCC_EXE
+        )
+    return profile.get("cpp_compiler") or (
+        "clang++" if download_script.is_tool_on_path("clang++") else
+        "g++" if download_script.is_tool_on_path("g++") else
+        GPP_EXE
+    )
         if download_script.is_tool_on_path("clang"): return "clang"
         if download_script.is_tool_on_path("gcc"): return "gcc"
         return GCC_EXE
@@ -71,8 +81,9 @@ def get_compiler_for_file(filepath):
     return GPP_EXE
 
 class CmpileBuilder:
-    def __init__(self, log_callback=None):
+    def __init__(self, log_callback=None, profile=None):
         self.log_callback = log_callback
+        self.profile = profile or {}
 
     def log(self, message, style=""):
         if self.log_callback:
@@ -156,7 +167,7 @@ class CmpileBuilder:
 
         compilation_failed = False
         for src in files:
-            compiler = get_compiler_for_file(src)
+            compiler = get_compiler_for_file(src, self.profile)
             base_name = os.path.basename(src)
             obj_name = os.path.splitext(base_name)[0] + ".o"
             obj_path = os.path.join(OUT_DIR, obj_name)
@@ -189,6 +200,18 @@ class CmpileBuilder:
         # Link
         self.log("Linking...")
 
+        cpp_in_use = any(f.lower().endswith(('.cpp', '.cxx', '.cc')) for f in files)
+
+        linker = self.profile.get("linker")
+        if not linker:
+            if cpp_in_use:
+                if download_script.is_tool_on_path("clang++"): linker = "clang++"
+                elif download_script.is_tool_on_path("g++"): linker = "g++"
+                else: linker = GPP_EXE
+            else:
+                if download_script.is_tool_on_path("clang"): linker = "clang"
+                elif download_script.is_tool_on_path("gcc"): linker = "gcc"
+                else: linker = GCC_EXE
         cpp_in_use = any(get_compiler_for_file(src) in [GPP_EXE, "g++", "clang++"] for src in files)
         if cpp_in_use:
             if download_script.is_tool_on_path("clang++"): linker = "clang++"
