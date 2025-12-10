@@ -72,6 +72,13 @@ def get_compiler_for_file(filepath, profile={}):
         "g++" if download_script.is_tool_on_path("g++") else
         GPP_EXE
     )
+        if download_script.is_tool_on_path("clang"): return "clang"
+        if download_script.is_tool_on_path("gcc"): return "gcc"
+        return GCC_EXE
+
+    if download_script.is_tool_on_path("clang++"): return "clang++"
+    if download_script.is_tool_on_path("g++"): return "g++"
+    return GPP_EXE
 
 class CmpileBuilder:
     def __init__(self, log_callback=None, profile=None):
@@ -205,6 +212,15 @@ class CmpileBuilder:
                 if download_script.is_tool_on_path("clang"): linker = "clang"
                 elif download_script.is_tool_on_path("gcc"): linker = "gcc"
                 else: linker = GCC_EXE
+        cpp_in_use = any(get_compiler_for_file(src) in [GPP_EXE, "g++", "clang++"] for src in files)
+        if cpp_in_use:
+            if download_script.is_tool_on_path("clang++"): linker = "clang++"
+            elif download_script.is_tool_on_path("g++"): linker = "g++"
+            else: linker = GPP_EXE
+        else:
+            if download_script.is_tool_on_path("clang"): linker = "clang"
+            elif download_script.is_tool_on_path("gcc"): linker = "gcc"
+            else: linker = GCC_EXE
 
         exe_name = os.path.splitext(os.path.basename(files[0]))[0] + ".exe"
         output_exe = os.path.join(OUT_DIR, exe_name)
