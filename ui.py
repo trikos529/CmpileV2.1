@@ -7,7 +7,7 @@ console = Console()
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Cmpile V2 - Compile and Run C/C++ code with ease.")
-    parser.add_argument("files", nargs='+', help="The C or C++ files or folders to compile and run.")
+    parser.add_argument("files", nargs='+', help="The C or C++ files to compile and run.")
     parser.add_argument("--compiler-flags", help="Additional compiler flags (quoted string).", default="")
     parser.add_argument("--clean", action="store_true", help="Force clean build (re-download/re-install if needed).")
     return parser.parse_args()
