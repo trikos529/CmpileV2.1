@@ -62,6 +62,7 @@ def get_compiler_for_file(filepath, profile={}):
     """Returns the appropriate compiler executable."""
     if filepath.endswith(('.c', '.C')):
 <<<<<<< HEAD
+<<<<<<< HEAD
         return profile.get("c_compiler") or (
             "clang" if download_script.is_tool_on_path("clang") else
             "gcc" if download_script.is_tool_on_path("gcc") else
@@ -74,6 +75,8 @@ def get_compiler_for_file(filepath, profile={}):
     )
         if download_script.is_tool_on_path("clang"): return "clang"
         if download_script.is_tool_on_path("gcc"): return "gcc"
+=======
+>>>>>>> parent of c3ecbf0 (Version 2,1 is here (may contain bugs))
 =======
 >>>>>>> parent of c3ecbf0 (Version 2,1 is here (may contain bugs))
         return GCC_EXE
@@ -184,6 +187,7 @@ class CmpileBuilder:
         # Link
         self.log("Linking...")
 <<<<<<< HEAD
+<<<<<<< HEAD
 
         cpp_in_use = any(f.lower().endswith(('.cpp', '.cxx', '.cc')) for f in files)
 
@@ -207,11 +211,16 @@ class CmpileBuilder:
             elif download_script.is_tool_on_path("gcc"): linker = "gcc"
             else: linker = GCC_EXE
 =======
+=======
+>>>>>>> parent of c3ecbf0 (Version 2,1 is here (may contain bugs))
         linker = GCC_EXE
         for src in files:
             if get_compiler_for_file(src) == GPP_EXE:
                 linker = GPP_EXE
                 break
+<<<<<<< HEAD
+>>>>>>> parent of c3ecbf0 (Version 2,1 is here (may contain bugs))
+=======
 >>>>>>> parent of c3ecbf0 (Version 2,1 is here (may contain bugs))
 
         exe_name = os.path.splitext(os.path.basename(files[0]))[0] + ".exe"
